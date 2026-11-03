@@ -133,7 +133,7 @@ function flatRowHtml(id, cur, color) {
             <div class="tt"><span class="${hasTitle(id) ? 't' : 't none'}">${esc(title(id))}</span>
             ${parent ? `<small>⇄ ${esc(cut(title(parent), 22))}에서 갈라짐</small>` : (kids ? `<small>⇄ 지선 ${kids}개</small>` : '')}</div>
             ${tags.join('')}
-            <span class="m">${c.count} · ${fmtShort(c.lastDate)}</span>
+            <span class="m">💬 ${c.count} · 🚇 ${fmtYmd(c.lastDate)}</span>
         </div>
     </div>`;
 }
