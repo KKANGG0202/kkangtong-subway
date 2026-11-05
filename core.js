@@ -188,6 +188,9 @@ export function parseDate(value, fallbackName) {
     if (typeof value === 'string' && value) {
         const t = Date.parse(value);
         if (!Number.isNaN(t)) return t;
+        // ST's own send_date looks like "November 5, 2026 3:52pm"; Date.parse needs a space before am/pm
+        const t2 = Date.parse(value.replace(/(\d)\s*([ap]m)\b/i, '$1 $2'));
+        if (!Number.isNaN(t2)) return t2;
         const m = value.match(/(\d{4})-(\d{1,2})-(\d{1,2})\s*@\s*(\d{1,2})h\s*(\d{1,2})m/);
         if (m) return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
         const n = Number(value);

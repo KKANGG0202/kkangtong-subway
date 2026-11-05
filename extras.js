@@ -397,7 +397,13 @@ function showAnnounce(ch, id, parent) {
     if (chat.length < 2) return;
     const last = [...chat].reverse().find((m) => m && !m.is_system) || chat[chat.length - 1];
     const lastTs = parseDate(last?.send_date);
-    if (s.announce === 'away' && lastTs && Date.now() - lastTs < (Number(s.announceDays) || 60) * 86400e3) return;
+    if (s.announce === 'away') {
+        // "away" = no message AND no visit for N days. A visit is recorded each time the board is shown,
+        // so the same chat doesn't announce again on the next open. An unreadable date never announces.
+        const ref = Math.max(lastTs || 0, Number(e.seenAt) || 0);
+        if (!ref || Date.now() - ref < (Number(s.announceDays) || 60) * 86400e3) return;
+    }
+    setEntry(id, { seenAt: Date.now() }, ch.avatar);
     const stale = e.summary && e.summarizedCount ? chat.length - e.summarizedCount : 0;
     const host = document.getElementById('sheld') || document.body;
     const el = document.createElement('div');
