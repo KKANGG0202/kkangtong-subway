@@ -23,6 +23,7 @@ export const defaultSettings = Object.freeze({
     announceDays: 60, // "오랜만" = this many days since the last message
     askBranchName: true,
     announceVer: 0,
+    startRecent: false, // v1.0.3: open 🌐 최근 탑승 when SillyTavern loads (off by default)
     pinnedBots: [],
     viewMode: 'tree', // tree | status | line
     autoStatus: true, // fill 🧪/🟢/💤 for chats the user has not tagged (🏁 is always manual)
@@ -743,8 +744,41 @@ export async function openChatOf(avatar, id) {
     }
     const found = charByAvatar(avatar);
     if (!found) throw new Error('캐릭터를 찾을 수 없어요');
+    const prevChat = found.char.chat;
     // selectCharacterById loads characters[index].chat, so point it at the wanted chat first
     found.char.chat = id;
     await c.selectCharacterById(found.index);
-    if (c.getCurrentChatId?.() !== id) await c.openCharacterChat(id);
+    // selectCharacterById bails out silently while a chat is saving; never open the chat on the wrong character
+    if (String(ctx().characterId) !== String(found.index)) {
+        found.char.chat = prevChat;
+        throw new Error('캐릭터를 바꾸지 못했어요 (챗 저장 중)');
+    }
+    if (ctx().getCurrentChatId?.() !== id) await ctx().openCharacterChat(id); // this also saves the card's last chat
+    else await saveLastChat(avatar, id);
+    await rememberActiveCharacter(found.char);
+}
+
+/**
+ * v1.0.3: selectCharacterById() only switches the screen. ST remembers "last chat of this bot" in the card's
+ * `chat` field and "last bot" in settings.active_character, and both are normally written by ST's own click
+ * handlers. Without this, a reload jumped back to whatever bot/chat was last opened through ST's own UI.
+ */
+async function saveLastChat(avatar, id) {
+    try {
+        const res = await fetch('/api/characters/merge-attributes', {
+            method: 'POST',
+            headers: ctx().getRequestHeaders(),
+            body: JSON.stringify({ avatar, chat: id }),
+        });
+        if (!res.ok) console.warn(LOG, 'saving last chat failed', res.status);
+    } catch (err) { console.warn(LOG, 'saving last chat failed', err); }
+}
+
+async function rememberActiveCharacter(char) {
+    try {
+        const st = await import('/script.js');
+        st.setActiveCharacter?.(char.avatar);
+        st.setActiveGroup?.(null);
+        ctx().saveSettingsDebounced();
+    } catch (err) { console.warn(LOG, 'saving active character failed', err); }
 }

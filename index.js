@@ -1,5 +1,5 @@
 // 깡통 노선도 (Kkangtong Subway) - chat & branch organizer for SillyTavern
-// v1.0.1
+// v1.0.3
 
 import {
     LOG, TOAST, state, app, ctx, getSettings, save, esc, openChar, loadMap, repairBrokenEntries, bulkSummarize,
@@ -192,7 +192,7 @@ function onKey(ev) {
 
 // ---------------------------------------------------------------- popup
 
-function openPopup() {
+function openPopup({ tab = 'map' } = {}) {
     let root = document.getElementById('kts-root');
     if (!root) {
         root = document.createElement('div');
@@ -210,7 +210,7 @@ function openPopup() {
         root.addEventListener('dragend', () => document.querySelectorAll('#kts-root .dragging, #kts-root .over').forEach((x) => x.classList.remove('dragging', 'over')));
     }
     root.style.display = '';
-    Object.assign(state, { open: true, editing: false, mobileDetail: false, selectMode: false, view: 'main', ticket: null, compare: null, peek: null, tab: 'map' });
+    Object.assign(state, { open: true, editing: false, mobileDetail: false, selectMode: false, view: 'main', ticket: null, compare: null, peek: null, tab });
     state.checked.clear();
     state.reasons.clear();
     state.selectedId = null;
@@ -273,7 +273,10 @@ function settingsHtml() {
                 <option value="light" ${sel('light', s.theme)}>라이트</option>
                 <option value="dark" ${sel('dark', s.theme)}>다크</option></select></label>
         </section>
-        <section><h4>🚪 여는 방법</h4><small>입력창 왼쪽 ☰ 메뉴의 「깡통 노선도」, 또는 <code>/subway</code> · <code>/노선도</code></small></section>
+        <section><h4>🚪 여는 방법</h4>
+            <label class="ck"><input id="kts-s-startrecent" type="checkbox" ${s.startRecent ? 'checked' : ''}> 실리를 켜거나 새로고침하면 🌐 최근 탑승부터 띄우기</label>
+            <small>끄면 실리 기본대로 마지막 챗이 바로 보여요.</small>
+            <small>입력창 왼쪽 ☰ 메뉴의 「깡통 노선도」, 또는 <code>/subway</code> · <code>/노선도</code></small></section>
     </div>`;
 }
 
@@ -296,6 +299,7 @@ function settingsChange(ev) {
         case 'kts-s-days': s.announceDays = clamp(t.value, 1, 3650, 60); break;
         case 'kts-s-askbranch': s.askBranchName = t.checked; break;
         case 'kts-s-theme': s.theme = t.value; break;
+        case 'kts-s-startrecent': s.startRecent = t.checked; break;
         default: return false;
     }
     save();
@@ -369,7 +373,9 @@ function bindEvents() {
         addMenuButton();
         addSlashCommand();
         bindEvents();
-        console.log(LOG, 'loaded v0.7.0');
+        // v1.0.3: optional start screen — show the 🌐 최근 탑승 list instead of jumping straight into a chat
+        if (s.startRecent) setTimeout(() => { try { openPopup({ tab: 'recent' }); } catch (err) { console.warn(LOG, err); } }, 300);
+        console.log(LOG, 'loaded v1.0.3');
     });
 })();
 
