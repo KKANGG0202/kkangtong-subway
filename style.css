@@ -869,3 +869,7 @@
 #kts-root .kts-tidy .row b { flex: none; min-width: 34px; text-align: right; font-size: 12.5px; color: inherit; }
 #kts-root .kts-tidy .sts { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--kts-sub); margin-top: 2px; }
 #kts-root .kts-tidy .sts b { color: var(--kts-ink); }
+
+/* v1.0.4: "rename the real chat file too" checkbox in the edit form */
+#kts-root .kts-edit .kts-edit-file { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; color: var(--kts-sub); cursor: pointer; }
+#kts-root .kts-edit .kts-edit-file input { width: auto; padding: 0; margin: 0; flex: none; }

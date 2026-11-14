@@ -1,5 +1,5 @@
 // 깡통 노선도 (Kkangtong Subway) - chat & branch organizer for SillyTavern
-// v1.0.3
+// v1.0.4
 
 import {
     LOG, TOAST, state, app, ctx, getSettings, save, esc, openChar, loadMap, repairBrokenEntries, bulkSummarize,
@@ -268,6 +268,8 @@ function settingsHtml() {
         </section>
         <section><h4>🌿 분기 · 🎨 테마</h4>
             <label class="ck"><input id="kts-s-askbranch" type="checkbox" ${s.askBranchName ? 'checked' : ''}> 분기를 만들면 바로 이름 물어보기</label>
+            <label class="ck"><input id="kts-s-renamefile" type="checkbox" ${s.renameFile ? 'checked' : ''}> 역 이름을 바꾸면 실제 챗 파일 이름도 바꾸기</label>
+            <small>✏️ 고치기 화면에서 그때그때 켜고 끌 수도 있어요. 이건 그 체크의 기본값이에요.</small>
             <label>테마 <select id="kts-s-theme" class="kts-s-sel">
                 <option value="auto" ${sel('auto', s.theme)}>자동 (실리 테마 밝기 따라감)</option>
                 <option value="light" ${sel('light', s.theme)}>라이트</option>
@@ -298,6 +300,7 @@ function settingsChange(ev) {
         case 'kts-s-announce': s.announce = t.value; break;
         case 'kts-s-days': s.announceDays = clamp(t.value, 1, 3650, 60); break;
         case 'kts-s-askbranch': s.askBranchName = t.checked; break;
+        case 'kts-s-renamefile': s.renameFile = t.checked; break;
         case 'kts-s-theme': s.theme = t.value; break;
         case 'kts-s-startrecent': s.startRecent = t.checked; break;
         default: return false;
@@ -375,7 +378,7 @@ function bindEvents() {
         bindEvents();
         // v1.0.3: optional start screen — show the 🌐 최근 탑승 list instead of jumping straight into a chat
         if (s.startRecent) setTimeout(() => { try { openPopup({ tab: 'recent' }); } catch (err) { console.warn(LOG, err); } }, 300);
-        console.log(LOG, 'loaded v1.0.3');
+        console.log(LOG, 'loaded v1.0.4');
     });
 })();
 

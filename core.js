@@ -22,6 +22,7 @@ export const defaultSettings = Object.freeze({
     announce: 'away', // away | always | off
     announceDays: 60, // "오랜만" = this many days since the last message
     askBranchName: true,
+    renameFile: false, // v1.0.4: renaming a station also renames the real chat file (off by default)
     announceVer: 0,
     startRecent: false, // v1.0.3: open 🌐 최근 탑승 when SillyTavern loads (off by default)
     pinnedBots: [],
@@ -374,6 +375,97 @@ export async function saveChatRaw(avatar, charName, id, header, messages) {
     await post('/api/chats/save', { ch_name: charName, file_name: id, chat: [header, ...messages], avatar_url: avatar });
 }
 
+/** Characters ST does not allow in file names (the server would strip them anyway). */
+export function fileSafeName(name) {
+    return String(name).replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '');
+}
+
+/**
+ * v1.0.4: renames the real chat file, then keeps everything pointing at it:
+ * the card's "last chat", branches whose main_chat points here, our own records (via CHAT_RENAMED).
+ * @returns {Promise<string|null>} the new id, or null when nothing was renamed
+ */
+export async function renameChatFile(avatar, oldId, wanted, { quiet = false } = {}) {
+    const c = ctx();
+    const warn = (m) => { if (!quiet) toastr.warning(m, TOAST); };
+    const name = fileSafeName(wanted);
+    if (!name || name === oldId) return null;
+    if (name.toLowerCase() === oldId.toLowerCase()) { warn('대소문자만 다른 이름으로는 바꿀 수 없어요.'); return null; }
+    const list = await fetchChatList(avatar, { metadata: true });
+    if (list.some((x) => x.id.toLowerCase() === name.toLowerCase())) { warn('같은 이름의 챗이 이미 있어요.'); return null; }
+    const kids = list.filter((x) => x.parent === oldId).map((x) => x.id);
+    const isOpen = openChar()?.avatar === avatar && c.getCurrentChatId?.() === oldId;
+
+    let newId = name;
+    if (isOpen) {
+        // ST's own way for the open chat: saves first, updates the card, reloads the chat, emits CHAT_RENAMED
+        await c.renameChat(oldId, name);
+        if (c.getCurrentChatId?.() !== name) { if (!quiet) toastr.error('챗 파일 이름을 바꾸지 못했어요.', TOAST); return null; }
+    } else {
+        const res = await fetch('/api/chats/rename', {
+            method: 'POST',
+            headers: c.getRequestHeaders(),
+            body: JSON.stringify({ is_group: false, avatar_url: avatar, original_file: `${oldId}.jsonl`, renamed_file: `${name}.jsonl` }),
+        });
+        const data = res.ok ? await res.json().catch(() => ({})) : { error: true };
+        if (data.error) { if (!quiet) toastr.error('챗 파일 이름을 바꾸지 못했어요.', TOAST); return null; }
+        newId = data.sanitizedFileName || name;
+        const found = charByAvatar(avatar);
+        if (found?.char?.chat === oldId) {
+            found.char.chat = newId;
+            await post('/api/characters/merge-attributes', { avatar, chat: newId }).catch((err) => console.warn(LOG, err));
+        }
+        await c.eventSource.emit(c.eventTypes?.CHAT_RENAMED ?? c.event_types.CHAT_RENAMED,
+            { avatarId: avatar, oldFileName: `${oldId}.jsonl`, newFileName: `${newId}.jsonl` });
+    }
+
+    // branches remember their parent by file name; point them at the new one
+    let fixed = 0;
+    for (const kid of kids) {
+        try {
+            if (openChar()?.avatar === avatar && c.getCurrentChatId?.() === kid) {
+                c.chatMetadata.main_chat = newId;
+                await c.saveMetadata();
+            } else {
+                const { header, messages } = await loadChatRaw(kid, avatar);
+                if (!header.chat_metadata) header.chat_metadata = {};
+                header.chat_metadata.main_chat = newId;
+                await saveChatRaw(avatar, charByAvatar(avatar)?.char?.name || '', kid, header, messages);
+            }
+            fixed++;
+        } catch (err) { console.warn(LOG, 'fixing branch link failed', kid, err); }
+    }
+    if (fixed < kids.length) toastr.warning(`지선 ${kids.length - fixed}개의 연결을 못 고쳤어요.`, TOAST);
+    return newId;
+}
+
+/** True while the file still has the name ST gave it ("Name - 2026-01-02@03h04m05s678ms", "… - Branch #3"). */
+export function isDefaultChatName(id) {
+    return /\d{4}-\d{1,2}-\d{1,2}\s*@\s*\d{1,2}h\s*\d{1,2}m\s*\d{1,2}s(?:\s*\d+\s*ms)?(?: - Branch #\d+)?$/.test(String(id));
+}
+
+/**
+ * v1.0.4: after a bulk summary, renames files to their station names. Only files that still carry ST's
+ * automatic name are touched — anything the user named by hand is left alone. Runs one at a time.
+ * @returns {Promise<{renamed:number, skipped:number}>}
+ */
+export async function renameFilesToTitles(avatar, ids) {
+    let renamed = 0;
+    let skipped = 0;
+    const map = new Map(ids.map((id) => [id, id]));
+    for (const [orig] of map) {
+        const id = map.get(orig);
+        const t = entry(id, avatar).title;
+        if (!t || !isDefaultChatName(id) || fileSafeName(t) === id) { skipped++; continue; }
+        let newId = null;
+        for (let n = 1; n <= 5 && !newId; n++) {
+            try { newId = await renameChatFile(avatar, id, n === 1 ? t : `${t} (${n})`, { quiet: true }); } catch (err) { console.warn(LOG, err); break; }
+        }
+        if (newId) { renamed++; map.set(orig, newId); } else skipped++;
+    }
+    return { renamed, skipped };
+}
+
 export async function deleteChatFile(avatar, id) {
     await post('/api/chats/delete', { chatfile: `${id}.jsonl`, avatar_url: avatar });
 }
@@ -680,26 +772,36 @@ export async function summarize(id, { quiet = false } = {}) {
     }
 }
 
-export async function bulkSummarize({ all = false } = {}) {
+export async function bulkSummarize({ all = false, ids = null } = {}) {
     if (state.bulk) return;
-    const targets = state.list.filter((c) => (all || !entry(c.id).summary) && c.count >= 2).map((c) => c.id);
+    const pick = ids ? new Set(ids) : null;
+    const targets = state.list.filter((c) => (pick ? pick.has(c.id) : (all || !entry(c.id).summary)) && c.count >= 2).map((c) => c.id);
     if (!targets.length) {
         toastr.info('요약할 역이 없어요.', TOAST);
         return;
     }
-    const { Popup, POPUP_RESULT } = ctx();
-    const ok = await Popup.show.confirm(all ? '모든 역 다시 요약' : '요약 없는 역 모두 요약', `역 ${targets.length}개를 ${BULK_CONCURRENCY}개씩 동시에 요약해요. 챗 하나당 API 요청이 한 번씩 나가요.${all ? '<br><small>직접 지은 역 이름은 그대로 두고 요약만 새로 써요.</small>' : ''}<br>진행할까요?`);
-    if (ok !== POPUP_RESULT.AFFIRMATIVE) return;
+    const c = ctx();
+    const head = pick ? `고른 역 ${targets.length}개 요약` : (all ? '모든 역 다시 요약' : '요약 없는 역 모두 요약');
+    const html = `<h3>${head}</h3><p>역 ${targets.length}개를 ${BULK_CONCURRENCY}개씩 동시에 요약해요. 챗 하나당 API 요청이 한 번씩 나가요.${pick || all ? '<br><small>직접 지은 역 이름은 그대로 두고 요약만 새로 써요.</small>' : ''}<br>진행할까요?</p>`;
+    const popup = new c.Popup(html, c.POPUP_TYPE.CONFIRM, '', {
+        okButton: '요약하기',
+        cancelButton: '취소',
+        customInputs: [{ id: 'kts_bulk_rename', label: '역 이름으로 실제 챗 파일 이름도 바꾸기 (직접 바꾼 파일 이름은 그대로)', defaultState: !!getSettings().renameFile }],
+    });
+    if (await popup.show() !== c.POPUP_RESULT.AFFIRMATIVE) return;
+    const withFiles = !!popup.inputResults?.get('kts_bulk_rename');
+    const avatar = state.avatar;
     state.bulk = { done: 0, total: targets.length, abort: false };
     app.render();
     let fail = 0;
     state.lastError = '';
     const queue = [...targets];
+    const summed = [];
     const worker = async () => {
         while (queue.length && state.bulk && !state.bulk.abort) {
             const id = queue.shift();
             const okOne = await summarize(id, { quiet: true });
-            if (!okOne) fail++;
+            if (!okOne) fail++; else summed.push(id);
             if (!state.bulk) return;
             state.bulk.done++;
             if (state.bulk.done >= 3 && fail === state.bulk.done && !state.bulk.abort) {
@@ -711,6 +813,18 @@ export async function bulkSummarize({ all = false } = {}) {
     };
     await Promise.all(Array.from({ length: Math.min(BULK_CONCURRENCY, targets.length) }, worker));
     const done = state.bulk?.done ?? 0;
+    // file renames only after every summary is in, one by one (a rename changes ids other workers may use)
+    if (withFiles && state.avatar === avatar) {
+        state.bulk = { done: 0, total: 0, abort: false, renaming: true };
+        app.render();
+        try {
+            const r = await renameFilesToTitles(avatar, summed);
+            if (r.renamed) toastr.success(`챗 파일 이름 ${r.renamed}개를 바꿨어요.${r.skipped ? `<br><small>직접 바꾼 이름·제목 없음·겹치는 이름 ${r.skipped}개는 그대로 뒀어요.</small>` : ''}`, TOAST, { escapeHtml: false });
+            else toastr.info('바꿀 챗 파일 이름이 없었어요. (직접 바꾼 이름은 그대로 둬요)', TOAST);
+        } catch (err) { console.error(LOG, err); toastr.error('챗 파일 이름을 바꾸다가 멈췄어요.', TOAST); }
+        state.bulk = null;
+        await app.refresh?.();
+    }
     state.bulk = null;
     app.render();
     if (fail) {

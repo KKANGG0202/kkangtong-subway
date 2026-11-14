@@ -4,7 +4,7 @@ import {
     STATUS, LINE_COLORS, TOAST, state, app, ctx, entry, setEntry, storeFor, esc, cut, fmtShort, fmtLong, fmtYmd, branchNo,
     fallbackTitle, title, hasTitle, currentChatId, isOpenCharView, openChar, isRoot, parentOf, buildTree, save,
     deleteChatFile, summarize, openChatOf, LOG, loadChat, shownText, linesFor, lineById, addLine, removeLine,
-    getSettings, bulkSummarize, statusOf, statusIcon, CREATED_SORTS,
+    getSettings, bulkSummarize, statusOf, statusIcon, CREATED_SORTS, renameChatFile,
 } from './core.js';
 import { divergenceHtml, ensureDivergence, compareHtml, recommendCandidates } from './extras.js';
 
@@ -472,6 +472,7 @@ function detailHtml(cur) {
         summaryBlock = `<div class="kts-edit">
             <label>역 이름</label>
             <input id="kts-edit-title" type="text" maxlength="60" value="${esc(e.title || '')}" placeholder="${esc(fallbackTitle(id))}">
+            <label class="kts-edit-file"><input id="kts-edit-file" type="checkbox" ${getSettings().renameFile ? 'checked' : ''}> 실제 챗 파일 이름도 바꾸기</label>
             <label>요약</label>
             <textarea id="kts-edit-summary" rows="5" placeholder="이 챗이 어떤 내용인지 적어두세요">${esc(e.summary || '')}</textarea>
             <div class="kts-edit-btns"><button class="kts-b p" data-act="edit-save">저장</button><button class="kts-b" data-act="edit-cancel">취소</button></div>
@@ -532,7 +533,7 @@ function detailHtml(cur) {
 function toolbarHtml() {
     const unsummarized = state.list.filter((c) => !entry(c.id).summary).length;
     const bulkBtn = state.bulk
-        ? `<button class="kts-pill on" data-act="bulk-stop">⏹ 요약 중지 (${state.bulk.done}/${state.bulk.total})</button>`
+        ? (state.bulk.renaming ? '<button class="kts-pill on" disabled>🗂️ 파일 이름 바꾸는 중…</button>' : `<button class="kts-pill on" data-act="bulk-stop">⏹ 요약 중지 (${state.bulk.done}/${state.bulk.total})</button>`)
         : (unsummarized ? `<button class="kts-pill" data-act="bulk" title="요약 없는 역을 모두 요약해요">🤖 요약 ${unsummarized}</button>` : '');
     const sorts = { recent: '최근 탑승순', old: '오래 안 탄 순', made: '최근 생성순', madeOld: '처음 생성순', size: '크기순', count: '메시지순' };
     const sortOpts = Object.entries(sorts).map(([k, v]) => `<option value="${k}" ${state.sort === k ? 'selected' : ''}>${v}</option>`).join('');
@@ -588,6 +589,7 @@ function footerHtml() {
                 <option value="line:">노선에서 빼기</option>
             </optgroup>
         </select>
+        <button class="kts-b" data-act="summarize-checked" ${n && !state.bulk ? '' : 'disabled'} title="고른 역만 요약해요">🤖 ${n}개 요약</button>
         <button class="kts-b" data-act="recommend" title="그리팅만 있는 챗, 시험운행, 짧은 챗, 오래 방치된 챗을 골라줘요 (기준은 ⚙️ 설정)">🧹 폐역 후보 추천</button>
         <select class="kts-b kts-short" id="kts-short" title="메시지가 적은 역을 한 번에 골라요">
             <option value="">💬 짧은 챗</option>
@@ -657,14 +659,33 @@ async function deleteChats(ids) {
     await app.refresh();
 }
 
-function saveEdit() {
+async function saveEdit() {
     const id = state.selectedId;
     const t = document.getElementById('kts-edit-title')?.value.trim() ?? '';
     const s = document.getElementById('kts-edit-summary')?.value.trim() ?? '';
+    const withFile = !!document.getElementById('kts-edit-file')?.checked;
+    // only a name typed in this edit renames the file; saving just a summary never touches it
+    const titleChanged = t !== (entry(id).title || '');
     setEntry(id, { title: t, summary: s, titleLocked: !!t });
     state.editing = false;
     buildTree();
     app.render();
+    if (!withFile || !titleChanged || !t || t === id) return;
+    if (state.renaming) return;
+    state.renaming = true;
+    try {
+        const newId = await renameChatFile(state.avatar, id, t);
+        if (newId) {
+            state.selectedId = newId;
+            await app.refresh();
+            toastr.success('챗 파일 이름도 바꿨어요.', TOAST);
+        }
+    } catch (err) {
+        console.error(LOG, err);
+        toastr.error('챗 파일 이름을 바꾸지 못했어요.', TOAST);
+    } finally {
+        state.renaming = false;
+    }
 }
 
 export function mapSaveEdit() { saveEdit(); }
@@ -769,6 +790,7 @@ export async function mapClick(act, el, ev) {
         }
         case 'recommend': recommendCandidates(); return true;
         case 'delete-checked': await deleteChats([...state.checked]); return true;
+        case 'summarize-checked': await bulkSummarize({ ids: [...state.checked] }); return true;
         case 'delete-one': await deleteChats([state.selectedId]); return true;
         case 'open': {
             const target = state.selectedId;
