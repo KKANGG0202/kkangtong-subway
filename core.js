@@ -486,12 +486,61 @@ export async function fetchRecentChats(max = 100000) {
 
 // ---------------------------------------------------------------- map data
 
+// v1.0.7: the chat list of each bot is kept (memory + browser storage), so a map opens instantly from the
+// last known list while the fresh one loads in the background. Reading every chat file is the slow part.
+const MAP_CACHE_KEY = 'kkangtong_subway_map_v1';
+const MAP_CACHE_MAX = 40;
+const mapCache = new Map();
+let mapCacheLoaded = false;
+const mapStore = () => SillyTavern.libs?.localforage || globalThis.localforage || null;
+
+async function ensureMapCache() {
+    if (mapCacheLoaded) return;
+    mapCacheLoaded = true;
+    try {
+        const saved = await mapStore()?.getItem(MAP_CACHE_KEY);
+        if (saved && typeof saved === 'object') {
+            for (const [avatar, list] of Object.entries(saved)) if (Array.isArray(list) && !mapCache.has(avatar)) mapCache.set(avatar, list);
+        }
+    } catch { /* storage unavailable */ }
+}
+
+let mapCacheTimer = null;
+function persistMapCache() {
+    clearTimeout(mapCacheTimer);
+    mapCacheTimer = setTimeout(() => {
+        // keep the most recently used bots only
+        const entries = [...mapCache.entries()].slice(-MAP_CACHE_MAX);
+        mapStore()?.setItem(MAP_CACHE_KEY, Object.fromEntries(entries)).catch?.(() => {});
+    }, 1500);
+}
+
+/** Last known chat list of a bot, or null. */
+export async function cachedChatList(avatar) {
+    await ensureMapCache();
+    return mapCache.get(avatar) || null;
+}
+
+let loadSeq = 0;
+
+/**
+ * Loads one bot's map. v1.0.7: when another load starts before this one finishes (e.g. picking a bot in
+ * 🌐 최근 탑승 while the open bot's map is still loading), the older result is thrown away instead of
+ * overwriting the newer bot's list. Returns false when it was superseded.
+ */
 export async function loadMap(avatar) {
+    const seq = ++loadSeq;
     const char = charByAvatar(avatar)?.char;
     state.avatar = avatar;
     state.charName = char?.name || avatar;
-    state.list = await fetchChatList(avatar);
+    const list = await fetchChatList(avatar);
+    if (seq !== loadSeq || state.avatar !== avatar) return false;
+    state.list = list;
     buildTree();
+    mapCache.delete(avatar);
+    mapCache.set(avatar, state.list);
+    persistMapCache();
+    return true;
 }
 
 export function buildTree() {

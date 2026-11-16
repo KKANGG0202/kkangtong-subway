@@ -1,9 +1,9 @@
 // 깡통 노선도 (Kkangtong Subway) - chat & branch organizer for SillyTavern
-// v1.0.6
+// v1.0.7
 
 import {
     LOG, TOAST, state, app, ctx, getSettings, save, esc, openChar, loadMap, repairBrokenEntries, bulkSummarize,
-    resolveTheme, charByAvatar,
+    resolveTheme, charByAvatar, cachedChatList, buildTree,
 } from './core.js';
 import { railSvgHtml, mapHtml, mapClick, mapChange, mapSaveEdit, flatten, mapDragStart, mapDragOver, mapDrop } from './map.js';
 import { recentHtml, statsHtml, hubClick, hubInput, hubChange } from './hub.js';
@@ -89,10 +89,26 @@ async function refresh({ avatar = state.avatar, keepSelection = true } = {}) {
     }
     state.loading = true;
     state.error = '';
-    if (avatar !== state.avatar) { state.list = []; state.collapsed.clear(); state.checked.clear(); state.reasons.clear(); state.compare = null; }
+    if (avatar !== state.avatar) {
+        state.list = [];
+        state.collapsed.clear(); state.checked.clear(); state.reasons.clear(); state.compare = null;
+        // v1.0.7: draw the last known map right away; the fresh list replaces it when it arrives
+        const cached = await cachedChatList(avatar);
+        if (cached?.length) {
+            state.avatar = avatar;
+            state.charName = charByAvatar(avatar)?.char?.name || avatar;
+            state.list = cached.map((x) => ({ ...x }));
+            buildTree();
+            if (!state.byId.has(state.selectedId)) {
+                const cur = openChar()?.avatar === avatar ? ctx().getCurrentChatId() : null;
+                state.selectedId = state.byId.has(cur) ? cur : (state.roots[0] ?? null);
+            }
+        }
+    }
     render();
     try {
-        await loadMap(avatar);
+        // a newer load (another bot) took over: leave the screen to it
+        if (await loadMap(avatar) === false) return;
         const cur = openChar()?.avatar === avatar ? ctx().getCurrentChatId() : null;
         if (!keepSelection || !state.byId.has(state.selectedId)) {
             state.selectedId = state.byId.has(cur) ? cur : (state.roots[0] ?? null);
@@ -378,7 +394,7 @@ function bindEvents() {
         bindEvents();
         // v1.0.3: optional start screen — show the 🌐 최근 탑승 list instead of jumping straight into a chat
         if (s.startRecent) setTimeout(() => { try { openPopup({ tab: 'recent' }); } catch (err) { console.warn(LOG, err); } }, 300);
-        console.log(LOG, 'loaded v1.0.6');
+        console.log(LOG, 'loaded v1.0.7');
     });
 })();
 
