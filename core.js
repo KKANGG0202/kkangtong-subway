@@ -807,12 +807,12 @@ export async function summarizeChat({ avatar, charName, id, parentId = null, cou
     const pe = parentId ? entry(parentId, avatar) : null;
     const system = 'You are an archivist who labels roleplay chat logs so the user can quickly recognize each chat later. You never continue the story; you only describe it.';
     const branchNote = parentId
-        ? `\nThis chat is a BRANCH that split off from another chat${pe?.title ? ` titled "${pe.title}"` : ''}.${pe?.summary ? ` The parent chat is summarized as: "${pe.summary}"` : ''}\nFocus on what makes this branch different from the parent: the choice that diverged and where it led.\n`
+        ? `\nThis chat is a BRANCH that split off from another chat${pe?.title ? ` titled "${pe.title}"` : ''}.${pe?.summary ? ` The parent chat is summarized as: "${pe.summary}"` : ''}\nFocus on what makes this branch different from the parent: the choice that diverged and where it led. Name the title after that turning point (for example, if someone lashes out at the split, the title is about that anger).\n`
         : '';
     const user = `Below is the latest part of a roleplay chat log with the character "${charName}".
 ${branchNote}
 Write two things:
-1. "title": a short, evocative title like a subway station name (max 20 characters) that names the current arc or situation concretely. No quotes, no emojis.
+1. "title": a short label (max 20 characters) that lets the user recognize THIS chat at a glance in a long list. Build it from the most memorable concrete moment: a specific emotion, action, object or place, ideally emotion/action + concrete thing, like "Furious Dinner", "Rooftop Confession", "Search for the Lost Locket", "Tears at the Station". It should read like a plain, catchy nickname, not like a novel or chapter title. Avoid abstract, poetic or overly general titles (bad: "Echoes of Fate", "A New Dawn", "Between Light and Shadow", "The Beginning of Change"). No quotes, no emojis.
 2. "summary": ONE sentence (max 70 characters) that pins down the CURRENT scene: who is where, doing what, right now. Use the actual character names and place names from the log. Be specific and concrete. Never use vague filler such as "the relationship deepens", "tension rises", "a new chapter begins", or "their bond grows".
 
 Good summary example: "In the abandoned chapel, Elias confronts Mira about the stolen letter while Kai keeps watch outside."
