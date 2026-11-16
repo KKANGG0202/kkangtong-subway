@@ -26,7 +26,7 @@ export const defaultSettings = Object.freeze({
     announceVer: 0,
     startRecent: false, // v1.0.3: open 🌐 최근 탑승 when SillyTavern loads (off by default)
     pinnedBots: [],
-    viewMode: 'tree', // tree | status | line
+    viewMode: 'tree', // tree | rail | recent | status | line
     autoStatus: true, // fill 🧪/🟢/💤 for chats the user has not tagged (🏁 is always manual)
     autoDays: 14, // 이 안에 탔으면 🟢 운행중
     restDays: 60, // 이만큼 넘게 안 탔으면 💤 운휴, 그 사이는 🟡 정차중

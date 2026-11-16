@@ -873,3 +873,10 @@
 /* v1.0.4: "rename the real chat file too" checkbox in the edit form */
 #kts-root .kts-edit .kts-edit-file { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; color: var(--kts-sub); cursor: pointer; }
 #kts-root .kts-edit .kts-edit-file input { width: auto; padding: 0; margin: 0; flex: none; }
+
+/* v1.0.6: "how long ago" tag in the recent view */
+#kts-root .kts-tag.ago {
+    opacity: 0.65;
+    font-weight: 400;
+    white-space: nowrap;
+}

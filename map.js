@@ -5,6 +5,7 @@ import {
     fallbackTitle, title, hasTitle, currentChatId, isOpenCharView, openChar, isRoot, parentOf, buildTree, save,
     deleteChatFile, summarize, openChatOf, LOG, loadChat, shownText, linesFor, lineById, addLine, removeLine,
     getSettings, bulkSummarize, statusOf, statusIcon, CREATED_SORTS, renameChatFile,
+    fileSafeName, isDefaultChatName, renameFilesToTitles, fmtAgo,
 } from './core.js';
 import { divergenceHtml, ensureDivergence, compareHtml, recommendCandidates } from './extras.js';
 
@@ -96,6 +97,12 @@ function sortIds(ids) {
 function groupedOrder() {
     const ids = state.list.map((c) => c.id).filter(matches);
     const groups = [];
+    if (viewMode() === 'recent') {
+        // v1.0.6: every station (main line and branches) in one list, most recently ridden first
+        ids.sort((a, b) => state.byId.get(b).lastDate - state.byId.get(a).lastDate);
+        groups.push({ key: 'recent:', icon: '🕒', name: '최근 탄 순', color: null, ids });
+        return groups;
+    }
     if (viewMode() === 'status') {
         for (const [k, v] of Object.entries(STATUS)) {
             groups.push({ key: `status:${k}`, icon: v.icon, name: v.label, color: null, ids: sortIds(ids.filter((x) => statusOf(x).key === k)) });
@@ -124,6 +131,11 @@ function flatRowHtml(id, cur, color) {
     if (state.selectMode && state.reasons.has(id)) tags.push(`<span class="kts-tag reason">🧹 ${esc(state.reasons.get(id))}</span>`);
     if (viewMode() === 'line') tags.push(statusIcon(id));
     if (viewMode() === 'status') tags.push(lineBadge(e.line));
+    if (viewMode() === 'recent') {
+        tags.push(statusIcon(id));
+        tags.push(lineBadge(e.line));
+        tags.push(`<span class="kts-tag ago">${esc(fmtAgo(c.lastDate))} · ${c.count}개</span>`);
+    }
     const kids = (state.children.get(id) || []).length;
     const check = state.selectMode ? `<span class="kts-check ${isCur ? 'disabled' : ''}">${state.checked.has(id) ? '✓' : ''}</span>` : '';
     return `<div class="${cls.join(' ')}" data-act="select" data-id="${esc(id)}" draggable="true">
@@ -150,7 +162,7 @@ function groupedHtml(cur) {
             : `<b>${esc(g.name)}</b><small>${g.ids.length}</small>`;
         const tools = g.line && !editing ? `<span class="tools"><button class="kts-mini" data-act="line-rename" data-v="${esc(g.line.id)}" title="이름 바꾸기">✏️</button><button class="kts-mini" data-act="line-delete" data-v="${esc(g.line.id)}" title="노선 없애기 (챗은 그대로)">🗑️</button></span>` : '';
         const rows = closed ? '' : (g.ids.length ? g.ids.map((x) => flatRowHtml(x, cur, g.color)).join('') : '<div class="kts-drop-hint">여기로 역을 끌어다 놓으세요</div>');
-        return `<section class="kts-grp ${closed ? 'closed' : ''}" data-drop="${esc(g.key)}" style="--c:${g.color || 'var(--kts-rail-strong)'}">
+        return `<section class="kts-grp ${closed ? 'closed' : ''}" ${g.key === 'recent:' ? '' : `data-drop="${esc(g.key)}"`} style="--c:${g.color || 'var(--kts-rail-strong)'}">
             <header data-act="group-toggle" data-v="${esc(g.key)}">${mark}${name}${tools}<span class="car">${closed ? '▸' : '▾'}</span></header>
             ${rows}
         </section>`;
@@ -200,6 +212,7 @@ export function mapDrop(ev) {
     if (!state.byId.has(id)) return true;
     const ids = state.selectMode && state.checked.has(id) ? [...state.checked] : [id];
     const [kind, value] = sec.dataset.drop.split(':');
+    if (kind === 'recent') return true;
     for (const x of ids) {
         if (kind === 'status') setEntry(x, { status: value || undefined });
         else setEntry(x, { line: value || undefined });
@@ -536,6 +549,10 @@ function toolbarHtml() {
         ? (state.bulk.renaming ? '<button class="kts-pill on" disabled>🗂️ 파일 이름 바꾸는 중…</button>' : `<button class="kts-pill on" data-act="bulk-stop">⏹ 요약 중지 (${state.bulk.done}/${state.bulk.total})</button>`)
         : (unsummarized ? `<button class="kts-pill" data-act="bulk" title="요약 없는 역을 모두 요약해요">🤖 요약 ${unsummarized}</button>` : '');
     const sorts = { recent: '최근 탑승순', old: '오래 안 탄 순', made: '최근 생성순', madeOld: '처음 생성순', size: '크기순', count: '메시지순' };
+    const renamable = renameCandidates().length;
+    const renameBtn = !state.bulk && renamable
+        ? `<button class="kts-pill" data-act="apply-titles" title="이미 지어둔 역 이름을 실제 챗 파일 이름에 적용해요 (요약·API 요청 없음)">🗂️ 파일 이름 ${renamable}</button>`
+        : '';
     const sortOpts = Object.entries(sorts).map(([k, v]) => `<option value="${k}" ${state.sort === k ? 'selected' : ''}>${v}</option>`).join('');
     const other = !isOpenCharView() && openChar() ? `<button class="kts-pill" data-act="map-home" title="지금 열린 캐릭터의 노선도로">↩ ${esc(cut(openChar().name, 10))}</button>` : '';
     return `<div class="kts-toolbar">
@@ -544,6 +561,7 @@ function toolbarHtml() {
         <input class="kts-search" id="kts-search" type="search" placeholder="🔍 역 이름, 요약으로 찾기" value="${esc(state.query)}">
         <select class="kts-pill kts-sort" id="kts-sort" title="본선 정렬">${sortOpts}</select>
         ${bulkBtn}
+        ${renameBtn}
         ${!state.bulk && !unsummarized && state.list.length ? '<button class="kts-pill" data-act="bulk-all" title="모든 역의 요약을 새 방식으로 다시 써요">🤖 전부 다시 요약</button>' : ''}
         <button class="kts-pill" data-act="wash-open" title="고르지 않은 스와이프와 추론 기록을 지워서 챗을 가볍게 해요 (선택 모드에서 고른 역만 할 수도 있어요)">🧽 객차 청소</button>
         <button class="kts-pill" data-act="rel-open" title="챗에 나온 인물들의 관계를 노선도로 보여줘요">🕸️ 관계도</button>
@@ -556,7 +574,7 @@ function toolbarHtml() {
 function legendHtml() {
     const f = (k, label) => `<button class="kts-f ${state.filter === k ? 'on' : ''}" data-act="filter" data-v="${k}">${label}</button>`;
     const mode = viewMode();
-    const views = [['tree', '🌳 트리'], ['rail', '🚇 가로'], ['status', '🗂️ 상태별'], ['line', '🎨 노선별']]
+    const views = [['recent', '🕒 최근순'], ['tree', '🌳 트리'], ['rail', '🚇 가로'], ['status', '🗂️ 상태별'], ['line', '🎨 노선별']]
         .map(([k, v]) => `<button class="${mode === k ? 'on' : ''}" data-act="view-mode" data-v="${k}">${v}</button>`).join('');
     const lines = linesFor();
     const lf = (v, html, color) => `<button class="kts-f ln ${state.lineFilter === v ? 'on' : ''}" data-act="line-filter" data-v="${esc(v ?? '')}" ${color ? `style="--c:${color}"` : ''}>${html}</button>`;
@@ -567,7 +585,7 @@ function legendHtml() {
         <span class="kts-seg sm">${views}</span>
         ${mode === 'tree' || mode === 'rail' ? `<span class="lg"><i style="background:var(--kts-rail)"></i>본선</span>
         <span class="lg"><i style="background:${LINE_COLORS[0]}"></i><i style="background:${LINE_COLORS[1]}"></i>지선</span>
-        <span class="lg">⇄ 환승역</span>` : `<span class="lg">${mode === 'status' ? '역을 끌어서 다른 칸에 놓으면 상태가 바뀌어요' : '역을 끌어서 노선에 넣어요 · 선택한 여러 역도 한 번에'}</span>`}
+        <span class="lg">⇄ 환승역</span>` : `<span class="lg">${mode === 'recent' ? '실리 채팅 목록처럼 마지막으로 탄 순서예요 · 지선도 같이 나와요' : mode === 'status' ? '역을 끌어서 다른 칸에 놓으면 상태가 바뀌어요' : '역을 끌어서 노선에 넣어요 · 선택한 여러 역도 한 번에'}</span>`}
         <span class="kts-filters">${f('all', '전체')}${f('pin', '⭐')}${Object.entries(STATUS).map(([k, v]) => f(k, v.icon)).join('')}</span>
     </div>${lineRow}`;
 }
@@ -624,6 +642,45 @@ export function mapHtml() {
             <div class="kts-list ${viewMode() === 'rail' ? 'rail' : viewMode() !== 'tree' ? 'grouped' : ''}">${list}</div>
             <div class="kts-detail">${detailHtml(cur)}</div>
         </div>` + footerHtml();
+}
+
+// ---------------------------------------------------------------- v1.0.6: apply station names to files
+
+/** Stations whose file still has ST's automatic name but already have a station name. */
+function renameCandidates() {
+    return state.list.map((c) => c.id).filter((id) => {
+        const t = entry(id).title;
+        return t && isDefaultChatName(id) && fileSafeName(t) && fileSafeName(t) !== id;
+    });
+}
+
+async function applyTitlesToFiles() {
+    const ids = renameCandidates();
+    if (!ids.length) {
+        toastr.info('바꿀 챗 파일 이름이 없어요.', TOAST);
+        return;
+    }
+    const sample = ids.slice(0, 12).map((id) => `<li>${esc(cut(id, 40))}<br><small>→ ${esc(fileSafeName(entry(id).title))}</small></li>`).join('')
+        + (ids.length > 12 ? `<li>…외 ${ids.length - 12}개</li>` : '');
+    const ok = await ctx().Popup.show.confirm(
+        `🗂️ 챗 파일 이름 ${ids.length}개 바꾸기`,
+        `<div class="kts-pop-list"><p>지어둔 역 이름을 실제 챗 파일 이름으로 바꿔요. 요약은 다시 하지 않아서 API 요청은 없어요.<br><small>실리가 자동으로 붙인 이름인 파일만 바꾸고, 직접 바꾼 파일 이름은 그대로 둬요. 지선 연결도 같이 고쳐요.</small></p><ul>${sample}</ul></div>`,
+    );
+    if (!ok) return;
+    const avatar = state.avatar;
+    state.bulk = { done: 0, total: 0, abort: false, renaming: true };
+    app.render();
+    try {
+        const r = await renameFilesToTitles(avatar, ids);
+        if (r.renamed) toastr.success(`챗 파일 이름 ${r.renamed}개를 바꿨어요.${r.skipped ? `<br><small>겹치는 이름 등 ${r.skipped}개는 그대로 뒀어요.</small>` : ''}`, TOAST, { escapeHtml: false });
+        else toastr.info('바꾼 챗 파일이 없어요.', TOAST);
+    } catch (err) {
+        console.error(LOG, err);
+        toastr.error('챗 파일 이름을 바꾸다가 멈췄어요.', TOAST);
+    }
+    state.bulk = null;
+    await app.refresh?.();
+    app.render();
 }
 
 // ---------------------------------------------------------------- actions
@@ -774,6 +831,7 @@ export async function mapClick(act, el, ev) {
             return true;
         }
         case 'bulk-all': await bulkSummarize({ all: true }); return true;
+        case 'apply-titles': await applyTitlesToFiles(); return true;
         case 'back': state.mobileDetail = false; app.render(); return true;
         case 'filter': state.filter = el.dataset.v; app.render(); return true;
         case 'select-mode':
