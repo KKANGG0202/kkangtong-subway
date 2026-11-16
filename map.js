@@ -138,7 +138,10 @@ function flatRowHtml(id, cur, color) {
     }
     const kids = (state.children.get(id) || []).length;
     const check = state.selectMode ? `<span class="kts-check ${isCur ? 'disabled' : ''}">${state.checked.has(id) ? '✓' : ''}</span>` : '';
-    return `<div class="${cls.join(' ')}" data-act="select" data-id="${esc(id)}" draggable="true">
+    // v1.0.8: in the recent view a tap boards the chat right away; the ⓘ button opens the details
+    const board = viewMode() === 'recent' && !state.selectMode;
+    const info = board ? `<button class="kts-info" data-act="goto" data-id="${esc(id)}" title="역 정보 보기">ⓘ</button>` : '';
+    return `<div class="${cls.join(' ')}" data-act="${board ? 'board' : 'select'}" data-id="${esc(id)}" draggable="true">
         ${check}<span class="kts-dot ${isCur ? 'now' : ''} ${kids ? 'xfer' : ''}" style="--c:${color || 'var(--kts-rail-strong)'}"></span>
         <div class="kts-row-body">
             ${e.pinned ? '<span class="kts-pin">⭐</span>' : ''}
@@ -147,6 +150,7 @@ function flatRowHtml(id, cur, color) {
             ${tags.join('')}
             <span class="m">💬 ${c.count} · 🚇 ${fmtYmd(c.lastDate)}</span>
         </div>
+        ${info}
     </div>`;
 }
 
@@ -585,7 +589,7 @@ function legendHtml() {
         <span class="kts-seg sm">${views}</span>
         ${mode === 'tree' || mode === 'rail' ? `<span class="lg"><i style="background:var(--kts-rail)"></i>본선</span>
         <span class="lg"><i style="background:${LINE_COLORS[0]}"></i><i style="background:${LINE_COLORS[1]}"></i>지선</span>
-        <span class="lg">⇄ 환승역</span>` : `<span class="lg">${mode === 'recent' ? '실리 채팅 목록처럼 마지막으로 탄 순서예요 · 지선도 같이 나와요' : mode === 'status' ? '역을 끌어서 다른 칸에 놓으면 상태가 바뀌어요' : '역을 끌어서 노선에 넣어요 · 선택한 여러 역도 한 번에'}</span>`}
+        <span class="lg">⇄ 환승역</span>` : `<span class="lg">${mode === 'recent' ? '마지막으로 탄 순서예요 · 누르면 바로 탑승, ⓘ는 역 정보' : mode === 'status' ? '역을 끌어서 다른 칸에 놓으면 상태가 바뀌어요' : '역을 끌어서 노선에 넣어요 · 선택한 여러 역도 한 번에'}</span>`}
         <span class="kts-filters">${f('all', '전체')}${f('pin', '⭐')}${Object.entries(STATUS).map(([k, v]) => f(k, v.icon)).join('')}</span>
     </div>${lineRow}`;
 }
@@ -789,6 +793,12 @@ export async function mapClick(act, el, ev) {
             }
             return true;
         case 'goto': select(id); return true;
+        case 'board': {
+            // v1.0.8: recent view - straight into the chat
+            app.closePopup();
+            try { await openChatOf(state.avatar, id); } catch (err) { console.error(LOG, err); toastr.error('챗을 열지 못했어요.', TOAST); }
+            return true;
+        }
         case 'peek': await togglePeek(state.selectedId); return true;
         case 'view-mode': getSettings().viewMode = el.dataset.v; save(); app.render(); return true;
         case 'line-filter': state.lineFilter = el.dataset.v || null; app.render(); return true;
