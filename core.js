@@ -439,9 +439,15 @@ export async function renameChatFile(avatar, oldId, wanted, { quiet = false } = 
     return newId;
 }
 
-/** True while the file still has the name ST gave it ("Name - 2026-01-02@03h04m05s678ms", "… - Branch #3"). */
+/**
+ * True while the file still has a name ST gave it: "Name - 2026-01-02@03h04m05s678ms", "… - Branch #3".
+ * v1.0.6: also "<any name> - Branch #3", the name ST gives a branch of a chat whose file was renamed.
+ * A name the user typed by hand never ends in " - Branch #N", so it is still left alone.
+ */
 export function isDefaultChatName(id) {
-    return /\d{4}-\d{1,2}-\d{1,2}\s*@\s*\d{1,2}h\s*\d{1,2}m\s*\d{1,2}s(?:\s*\d+\s*ms)?(?: - Branch #\d+)?$/.test(String(id));
+    const t = String(id);
+    return /\d{4}-\d{1,2}-\d{1,2}\s*@\s*\d{1,2}h\s*\d{1,2}m\s*\d{1,2}s(?:\s*\d+\s*ms)?(?: - Branch #\d+)?$/.test(t)
+        || / - Branch #\d+$/.test(t);
 }
 
 /**
@@ -455,8 +461,11 @@ export async function renameFilesToTitles(avatar, ids) {
     const map = new Map(ids.map((id) => [id, id]));
     for (const [orig] of map) {
         const id = map.get(orig);
-        const t = entry(id, avatar).title;
-        if (!t || !isDefaultChatName(id) || fileSafeName(t) === id) { skipped++; continue; }
+        const e = entry(id, avatar);
+        const t = e.title;
+        // v1.0.6: a name typed by hand in the map (titleLocked) is applied even over a file name set in ST;
+        // an AI name only replaces ST's automatic file names
+        if (!t || (!isDefaultChatName(id) && !e.titleLocked) || fileSafeName(t) === id) { skipped++; continue; }
         let newId = null;
         for (let n = 1; n <= 5 && !newId; n++) {
             try { newId = await renameChatFile(avatar, id, n === 1 ? t : `${t} (${n})`, { quiet: true }); } catch (err) { console.warn(LOG, err); break; }

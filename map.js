@@ -649,8 +649,9 @@ export function mapHtml() {
 /** Stations whose file still has ST's automatic name but already have a station name. */
 function renameCandidates() {
     return state.list.map((c) => c.id).filter((id) => {
-        const t = entry(id).title;
-        return t && isDefaultChatName(id) && fileSafeName(t) && fileSafeName(t) !== id;
+        const e = entry(id);
+        const t = e.title;
+        return t && (isDefaultChatName(id) || e.titleLocked) && fileSafeName(t) && fileSafeName(t) !== id;
     });
 }
 
@@ -664,7 +665,7 @@ async function applyTitlesToFiles() {
         + (ids.length > 12 ? `<li>…외 ${ids.length - 12}개</li>` : '');
     const ok = await ctx().Popup.show.confirm(
         `🗂️ 챗 파일 이름 ${ids.length}개 바꾸기`,
-        `<div class="kts-pop-list"><p>지어둔 역 이름을 실제 챗 파일 이름으로 바꿔요. 요약은 다시 하지 않아서 API 요청은 없어요.<br><small>실리가 자동으로 붙인 이름인 파일만 바꾸고, 직접 바꾼 파일 이름은 그대로 둬요. 지선 연결도 같이 고쳐요.</small></p><ul>${sample}</ul></div>`,
+        `<div class="kts-pop-list"><p>지어둔 역 이름을 실제 챗 파일 이름으로 바꿔요. 요약은 다시 하지 않아서 API 요청은 없어요.<br><small>본선·지선 모두 바꿔요. 노선도에서 손으로 고친 역 이름은 항상 적용하고, AI가 지은 이름은 실리에서 직접 바꾼 파일 이름을 덮어쓰지 않아요. 지선 연결도 같이 고쳐요.</small></p><ul>${sample}</ul></div>`,
     );
     if (!ok) return;
     const avatar = state.avatar;
