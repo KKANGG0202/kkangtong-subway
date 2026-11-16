@@ -1,5 +1,5 @@
 // 깡통 노선도 (Kkangtong Subway) - chat & branch organizer for SillyTavern
-// v1.0.4
+// v1.0.5
 
 import {
     LOG, TOAST, state, app, ctx, getSettings, save, esc, openChar, loadMap, repairBrokenEntries, bulkSummarize,
@@ -378,7 +378,7 @@ function bindEvents() {
         bindEvents();
         // v1.0.3: optional start screen — show the 🌐 최근 탑승 list instead of jumping straight into a chat
         if (s.startRecent) setTimeout(() => { try { openPopup({ tab: 'recent' }); } catch (err) { console.warn(LOG, err); } }, 300);
-        console.log(LOG, 'loaded v1.0.4');
+        console.log(LOG, 'loaded v1.0.5');
     });
 })();
 

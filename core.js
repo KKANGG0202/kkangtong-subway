@@ -595,17 +595,44 @@ function sourceExtras(profileId) {
     return extras;
 }
 
+function isVertexProfile(profileId) {
+    try { return ctx().ConnectionManagerRequestService.getProfile(profileId)?.api === 'vertexai'; } catch { return false; }
+}
+
 export async function callModel(system, user, maxTokens = 1500) {
     const c = ctx();
     const profileId = getSettings().profileId;
     if (profileId && c.ConnectionManagerRequestService) {
-        const res = await c.ConnectionManagerRequestService.sendRequest(
+        const send = (extras) => c.ConnectionManagerRequestService.sendRequest(
             profileId,
             [{ role: 'system', content: system }, { role: 'user', content: user }],
             maxTokens,
             { stream: false, extractData: true, includePreset: false, includeInstruct: true },
-            sourceExtras(profileId),
+            extras,
         );
+        const extras = sourceExtras(profileId);
+        let res;
+        if (isVertexProfile(profileId)) {
+            // v1.0.5: the auth mode copied from the main Chat Completion settings can differ from what this
+            // profile's key needs (e.g. "full" service account vs an Express API key). Try the remembered or
+            // copied mode first, then the other one, and remember whichever works.
+            const s = getSettings();
+            if (!s.vertexAuthModes || typeof s.vertexAuthModes !== 'object') s.vertexAuthModes = {};
+            const first = s.vertexAuthModes[profileId] || extras.vertexai_auth_mode || 'express';
+            const modes = [first, first === 'full' ? 'express' : 'full'];
+            let lastErr;
+            for (const mode of modes) {
+                try {
+                    res = await send({ ...extras, vertexai_auth_mode: mode });
+                    if (s.vertexAuthModes[profileId] !== mode) { s.vertexAuthModes[profileId] = mode; save(); }
+                    lastErr = null;
+                    break;
+                } catch (err) { lastErr = err; }
+            }
+            if (lastErr) throw lastErr;
+        } else {
+            res = await send(extras);
+        }
         return typeof res === 'string' ? res : (res?.content ?? '');
     }
     return await c.generateRaw({ systemPrompt: system, prompt: user, responseLength: maxTokens });
