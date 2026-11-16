@@ -616,44 +616,20 @@ export async function callModel(system, user, maxTokens = 1500) {
             // v1.0.5: the auth mode copied from the main Chat Completion settings can differ from what this
             // profile's key needs (e.g. "full" service account vs an Express API key). Try the remembered or
             // copied mode first, then the other one, and remember whichever works.
-            // v1.0.6: the server reads the auth key from the *active* secret but, in Full mode, reads the
-            // service account again with the profile's secret_id. When the profile points at a key of another
-            // kind, Full mode fails with a bare 400. So also try without the profile's secret_id (= the key the
-            // main chat uses). Remember whichever combination works.
             const s = getSettings();
             if (!s.vertexAuthModes || typeof s.vertexAuthModes !== 'object') s.vertexAuthModes = {};
-            const saved = s.vertexAuthModes[profileId];
-            const savedMode = typeof saved === 'string' ? saved : saved?.mode;
-            const first = savedMode || extras.vertexai_auth_mode || 'express';
+            const first = s.vertexAuthModes[profileId] || extras.vertexai_auth_mode || 'express';
             const modes = [first, first === 'full' ? 'express' : 'full'];
-            const tries = [];
-            if (saved && typeof saved === 'object') tries.push({ mode: saved.mode, activeKey: !!saved.activeKey });
+            let lastErr;
             for (const mode of modes) {
-                tries.push({ mode, activeKey: false });
-                tries.push({ mode, activeKey: true });
-            }
-            const seen = new Set();
-            const errors = [];
-            let ok = null;
-            for (const t of tries) {
-                const key = `${t.mode}|${t.activeKey}`;
-                if (seen.has(key)) continue;
-                seen.add(key);
                 try {
-                    // secret_id: undefined is dropped from the JSON body, so the server falls back to the active key
-                    res = await send({ ...extras, vertexai_auth_mode: t.mode, ...(t.activeKey ? { secret_id: undefined } : {}) });
-                    ok = t;
+                    res = await send({ ...extras, vertexai_auth_mode: mode });
+                    if (s.vertexAuthModes[profileId] !== mode) { s.vertexAuthModes[profileId] = mode; save(); }
+                    lastErr = null;
                     break;
-                } catch (err) { errors.push(err); }
+                } catch (err) { lastErr = err; }
             }
-            if (!ok) {
-                // show the most useful message, not the last bare "API request failed"
-                throw errors.find((e) => errText(e) && !/^API request failed$/.test(errText(e))) || errors[errors.length - 1];
-            }
-            if (savedMode !== ok.mode || !!saved?.activeKey !== ok.activeKey) {
-                s.vertexAuthModes[profileId] = { mode: ok.mode, activeKey: ok.activeKey };
-                save();
-            }
+            if (lastErr) throw lastErr;
         } else {
             res = await send(extras);
         }
