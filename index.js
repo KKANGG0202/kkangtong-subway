@@ -1,5 +1,5 @@
 // 깡통 노선도 (Kkangtong Subway) - chat & branch organizer for SillyTavern
-// v1.0.8
+// v1.0.9
 
 import {
     LOG, TOAST, state, app, ctx, getSettings, save, esc, openChar, loadMap, repairBrokenEntries, bulkSummarize,
@@ -24,6 +24,41 @@ const TABS = [
     ['series', '🗂️ 시리즈'],
     ['twins', '🎫 중복 검표'],
 ];
+
+/**
+ * Puts the freshly rendered content (newRoot) into liveRoot without touching `keep` (the focused input):
+ * at every level from the input up to the root, the input's ancestor stays and its other children are
+ * replaced by the new ones. Returns false when the new HTML has no matching input at the same depth.
+ */
+function patchAround(liveRoot, newRoot, keep) {
+    const next = newRoot.querySelector(`#${CSS.escape(keep.id)}`);
+    if (!next || next.tagName !== keep.tagName) return false;
+    const livePath = [];
+    const newPath = [];
+    for (let x = keep; x && x !== liveRoot; x = x.parentElement) livePath.push(x);
+    for (let x = next; x && x !== newRoot; x = x.parentElement) newPath.push(x);
+    if (livePath.length !== newPath.length) return false;
+    // keep the input's own attributes in step too (placeholder, classes), but never its value
+    for (const { name, value } of [...next.attributes]) if (name !== 'value' && keep.getAttribute(name) !== value) keep.setAttribute(name, value);
+    const parents = [[liveRoot, newRoot], ...livePath.slice(1).reverse().map((l, i) => [l, newPath.slice(1).reverse()[i]])];
+    for (let i = parents.length - 1; i >= 0; i--) {
+        const [lp, np] = parents[i];
+        const lChild = livePath[livePath.length - 1 - i];
+        const nChild = newPath[newPath.length - 1 - i];
+        if (lp !== liveRoot) {
+            for (const a of [...lp.attributes]) if (!np.hasAttribute(a.name)) lp.removeAttribute(a.name);
+            for (const { name, value } of [...np.attributes]) if (lp.getAttribute(name) !== value) lp.setAttribute(name, value);
+        }
+        const before = [];
+        const after = [];
+        let seen = false;
+        for (const c of [...np.childNodes]) { if (c === nChild) { seen = true; continue; } (seen ? after : before).push(c); }
+        for (const c of [...lp.childNodes]) if (c !== lChild) c.remove();
+        lChild.before(...before);
+        lChild.after(...after);
+    }
+    return true;
+}
 
 function render() {
     const root = document.getElementById('kts-root');
@@ -50,13 +85,23 @@ function render() {
 
     const tabs = state.view !== 'main' ? '' : `<nav class="kts-tabs">${TABS.map(([k, label]) =>
         `<button class="${state.tab === k ? 'on' : ''}" data-act="tab" data-v="${k}">${label}</button>`).join('')}</nav>`;
-    pop.innerHTML = `<div class="kts-top">
+    const html = `<div class="kts-top">
             <div class="kts-logo"><div class="ic">깡</div><div class="ttl">깡통 노선도</div></div>
             ${tabs}
             <button class="kts-gear ${state.view === 'settings' ? 'on' : ''}" data-act="settings" title="설정">⚙️</button>
             <button class="kts-x" data-act="close" title="닫기">✕</button>
         </div>
         <div class="kts-page">${body}</div>`;
+    // v1.0.9: while typing in a search box, keep that very input element and swap everything around it.
+    // Replacing the focused input closes the phone keyboard after every letter.
+    const active = document.activeElement;
+    let patched = false;
+    if (active?.id && active.tagName === 'INPUT' && pop.contains(active) && !['checkbox', 'radio', 'number', 'range'].includes(active.type)) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        try { patched = patchAround(pop, tmp, active); } catch (err) { console.warn(LOG, err); patched = false; }
+    }
+    if (!patched) pop.innerHTML = html;
 
     // the grass scrolls sideways on phones: start at the newest weeks
     const grass = root.querySelector('.kts-grass-wrap');
@@ -65,7 +110,7 @@ function render() {
         const el = root.querySelector(sel);
         if (el) el.scrollTop = top;
     }
-    if (focused) {
+    if (focused && !patched) {
         const el = document.getElementById(focused);
         if (el && el.tagName === 'INPUT' && el.type !== 'checkbox') {
             el.focus();
@@ -394,7 +439,7 @@ function bindEvents() {
         bindEvents();
         // v1.0.3: optional start screen — show the 🌐 최근 탑승 list instead of jumping straight into a chat
         if (s.startRecent) setTimeout(() => { try { openPopup({ tab: 'recent' }); } catch (err) { console.warn(LOG, err); } }, 300);
-        console.log(LOG, 'loaded v1.0.8');
+        console.log(LOG, 'loaded v1.0.9');
     });
 })();
 
